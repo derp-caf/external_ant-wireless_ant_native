@@ -35,10 +35,10 @@
 #include <mutex>              // std::mutex, std::unique_lock
 #include <condition_variable> // std::condition_variable
 #include <cstdlib>
+#include <cutils/properties.h>
 #include <thread>
 
-#include <hwbinder/ProcessState.h>
-
+#include <hwbinder/IPCThreadState.h>
 #include <com/qualcomm/qti/ant/1.0/IAntHci.h>
 #include <com/qualcomm/qti/ant/1.0/IAntHciCallbacks.h>
 #include <com/qualcomm/qti/ant/1.0/types.h>
@@ -47,9 +47,10 @@
 
 
 #include <hidl/Status.h>
-#include <hwbinder/ProcessState.h>
 #include "ant_types.h"
 #include "AntHidlClient.h"
+
+using android::hardware::IPCThreadState;
 using ::android::hardware::hidl_death_recipient;
 using ::android::wp;
 using com::qualcomm::qti::ant::V1_0::IAntHci;
@@ -173,6 +174,31 @@ public:
    }
 };
 
+#ifdef ARCH_ARM_32
+bool IsLazyHalSupported()
+{
+  static bool isPropertyRead = false;
+  static bool isLazyHalEnabled = false;
+
+  ALOGD("%s isPropertyRead: %d isLazyHalEnabled: %d", __func__, isPropertyRead,
+         isLazyHalEnabled);
+
+  if (!isPropertyRead) {
+    char device[PROPERTY_VALUE_MAX]= {'\0'};
+    int len = property_get("ro.board.platform", device, "");
+    if (len) {
+      isPropertyRead = true;
+      isLazyHalEnabled = (!strcmp(device, "bengal") ? true : false);
+      ALOGD("%s isLazyHalEnabled: %d", __func__, isLazyHalEnabled);
+    } else {
+      ALOGE("%s: Failed to read property", __func__);
+    }
+  }
+
+  return isLazyHalEnabled;
+}
+#endif
+
 bool hci_initialize()
 {
    ALOGI("%s", __func__);
@@ -199,15 +225,23 @@ void hci_close() {
    if(anthci != nullptr)
    {
       auto hidl_daemon_status = anthci->close();
-      if(!hidl_daemon_status.isOk())
-      {
+      if(!hidl_daemon_status.isOk()) {
          ALOGE("%s: HIDL daemon is dead", __func__);
+      } else {
+#ifdef ARCH_ARM_32
+         if (IsLazyHalSupported()) {
+           ALOGD("%s: decrementing HIDL usage counter", __func__);
+           IPCThreadState::self()->flushCommands();
+         }
+#endif
       }
+
       std::unique_lock< std::mutex> lock(ant_hci.data_mtx);
       ant_hci.data_cond.notify_all();
    }
    ant_hci.state = ANT_RADIO_DISABLED;
    ant_rx_clear();
+
    anthci =nullptr;
    ALOGI("%s: exit", __func__);
 }
