@@ -35,6 +35,10 @@ LOCAL_C_INCLUDES := \
    $(QCOM_DIR)/include \
    $(HWBINDER_DIR)/include
 
+# Enable LAZY HAL
+ifeq ($(TARGET_ARCH), arm)
+LOCAL_CFLAGS += -DARCH_ARM_32
+endif
 
 ifeq ($(BOARD_ANT_WIRELESS_DEVICE),"qualcomm-hidl")
 LOCAL_C_INCLUDES += \
